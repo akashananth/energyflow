@@ -1,0 +1,99 @@
+version: "3.8"
+
+services:
+
+  # ── Zookeeper ──────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Kafka Broker ───────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ── Energy Price Producer ──────────────────────────────────────────────────
+  producer:
+    build: ./producer
+    container_name: energy_producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      TOPIC_NAME: energy.prices
+      PUBLISH_INTERVAL_SECONDS: 5
+    restart: on-failure
+
+  # ── Kafka UI ───────────────────────────────────────────────────────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka_ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  # ── Spark + Jupyter ────────────────────────────────────────────────────────
+  spark:
+    image: jupyter/pyspark-notebook:spark-3.4.0
+    container_name: spark_jupyter
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8888:8888"
+      - "4040:4040"
+    volumes:
+      - ./spark/notebooks:/home/jovyan/notebooks
+      - ./spark/delta:/home/jovyan/delta
+      - ./spark/checkpoints:/home/jovyan/checkpoints
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      GRANT_SUDO: "yes"
+    user: root
+    command: >
+      bash -c "pip install jupyter-server &&
+      jupyter lab
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --ServerApp.token=''
+      --ServerApp.password=''
+      --ServerApp.disable_check_xsrf=True
+      --notebook-dir=/home/jovyan"
+
+volumes:
+  kafka_data:

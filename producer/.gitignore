@@ -1,0 +1,18 @@
+```
+# Delta table data
+spark/delta/
+
+# Spark checkpoints
+spark/checkpoints/
+
+# Kafka volume data
+kafka_data/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Environment
+.env
+```
